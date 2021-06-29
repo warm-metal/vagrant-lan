@@ -12,7 +12,7 @@ DNSConfig=/etc/dnsmasq.d/vm-dns.conf
 flock 500
 
 if [ -f ${DHCPConfig} ]; then
-	ExistedRescord=$(grep -w ${hostname} ${DHCPConfig})
+	ExistedRescord=$(grep -w ${hostname} ${DHCPConfig} || true)
 fi
 
 mac1=08

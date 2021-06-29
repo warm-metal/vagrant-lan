@@ -24,11 +24,13 @@ Vagrant.configure("2") do |config|
       puts "fetching the LAN gateway machine #{GATEWAY_MACHINE}"
       vmstat = `VBoxManage showvminfo #{GATEWAY_MACHINE} --machinereadable | grep VMState=`
       raise "Please install the lan gateway" if !$?.success?
-      if vmstat != "running" and vmstat != "starting"
-        puts "starting gateway"
+      vmstat.strip!
+      if vmstat != 'VMState="running"' and vmstat != 'VMState="starting"'
+        puts "starting gateway #{vmstat}"
         `VBoxManage startvm #{GATEWAY_MACHINE} --type headless`
       end
 
+      puts "fetching address of #{m.config.vm.hostname}"
       r = Vagrant::Util::Subprocess.execute(
         'ssh', "-i", ROOT_RSA,
         "vagrant@#{VM_LAN_GATEWAY_IP}",
