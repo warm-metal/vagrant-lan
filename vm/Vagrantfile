@@ -33,13 +33,13 @@ Vagrant.configure("2") do |config|
       puts "fetching address of #{m.config.vm.hostname}"
       r = Vagrant::Util::Subprocess.execute(
         'ssh', "-i", ROOT_RSA,
+        '-o', 'StrictHostKeyChecking=no',
         "vagrant@#{VM_LAN_GATEWAY_IP}",
         "sudo /usr/local/bin/mac_ip_alloc.sh #{m.config.vm.hostname} #{VM_LAN_IP_PREFIX}",
         :notify => [:stdout, :stderr],)
 
-      raise r.stderr if r.exit_code != 0
       addr = r.stdout.split(/\s+/)
-      raise addr if addr.length != 2
+      raise r.stdout if addr.length != 2
       mac = addr[0]
       ip = addr[1]
 
@@ -57,6 +57,13 @@ Vagrant.configure("2") do |config|
       if runningVM == "" || runningVM == GATEWAY_MACHINE
         `VBoxManage controlvm #{GATEWAY_MACHINE} acpipowerbutton`
       end
+    end
+  end
+
+  config.trigger.before :destroy do |t|
+    t.info = "Removing group"
+    t.ruby do |env, m|
+      `VBoxManage modifyvm #{m.id} --groups ""`
     end
   end
 

@@ -85,7 +85,7 @@ ip=${ipPrefix}${NextIP3}.${NextIP4}
 
 echo "dhcp-host=${mac1}:${mac2}:${mac3}:${NextMac4}:${NextMac5}:${NextMac6},${hostname},${ip},infinite" >> ${DHCPConfig}
 echo "address=/${hostname}/${ip}" >> ${DNSConfig}
-service dnsmasq restart
+service dnsmasq restart > /dev/null
 
 echo ${mac1}${mac2}${mac3}${NextMac4}${NextMac5}${NextMac6} ${ip}
 
