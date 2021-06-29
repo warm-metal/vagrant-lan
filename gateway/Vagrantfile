@@ -1,0 +1,57 @@
+# DO NOT modify unless being necessary
+VM_LAN = "vboxnet0"
+VM_LAN_IP_PREFIX = "10.38."
+# Currently only a 16bit mask is supported.
+VM_LAN_MASK = "255.255.0.0"
+VM_LAN_IP = "#{VM_LAN_IP_PREFIX}0.1"
+VM_LAN_GATEWAY_IP = "#{VM_LAN_IP_PREFIX}0.2"
+GATEWAY_MACHINE = "#{VM_LAN}-gateway"
+ROOT_RSA = "~/.ssh/id_rsa"
+
+Vagrant.configure("2") do |config|
+  config.trigger.before :up do |t|
+    t.info = "Validating network and the gateway machine"
+    t.ruby do |env, m|
+      puts "fetching LAN #{VM_LAN} ..."
+      lan = `VBoxManage list hostonlyifs | grep #{VM_LAN}`
+      if lan == ""
+        puts "#{VM_LAN} is not found. create it with #{VM_LAN_IP}/#{VM_LAN_MASK}!"
+        createdLAN = `VBoxManage hostonlyif create`
+        raise $?.exitstatus if !$?.success?
+        raise "the created LAN #{createdLAN} is not #{VM_LAN}. You can change the VM_LAN configuration to the new created LAN" if !createdLAN.include? VM_LAN
+        `VBoxManage hostonlyif ipconfig #{VM_LAN} --ip #{VM_LAN_IP} --netmask #{VM_LAN_MASK}`
+        raise $?.exitstatus if !$?.success?
+      else
+        puts "found"
+      end
+    end
+  end
+
+  config.trigger.after :destroy do |t|
+    t.info = "removing network #{VM_LAN}"
+    t.ruby do |env, m|
+      `VBoxManage hostonlyif remove #{VM_LAN}`
+    end
+  end
+
+  config.vm.define GATEWAY_MACHINE do |gateway|
+    gateway.vm.provider :virtualbox do |vbox|
+      vbox.name = GATEWAY_MACHINE
+      vbox.memory = 256
+      vbox.cpus = 1
+    end
+
+    gateway.vm.box = "generic/alpine312"
+    gateway.vm.network :private_network, :name => VM_LAN, :ip => VM_LAN_GATEWAY_IP, :netmask => VM_LAN_MASK, :adapter => 2
+    gateway.vm.provision :shell, inline: "apk add --no-cache iptables dnsmasq"
+    gateway.vm.provision :shell, inline: "echo net.ipv4.conf.all.forwarding = 1 > /etc/sysctl.d/01-ip-forwarding.conf && sysctl -p"
+    gateway.vm.provision :shell, inline: "iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE"
+    gateway.vm.provision :shell, inline: "rc-update add dnsmasq && rc-update add iptables && /etc/init.d/iptables save"
+    gateway.vm.provision :file, source: ROOT_RSA+".pub", destination: "/tmp/authorized_keys"
+    gateway.vm.provision :shell, inline: "cat /tmp/authorized_keys >> /home/vagrant/.ssh/authorized_keys"
+    `curl -skL https://raw.githubusercontent.com/warm-metal/vagrant-lan/master/mac_ip_alloc.sh -o /tmp/mac_ip_alloc.sh`
+    gateway.vm.provision :file, source: "/tmp/mac_ip_alloc.sh", destination: "/tmp/mac_ip_alloc.sh"
+    gateway.vm.provision :shell, inline: "mv /tmp/mac_ip_alloc.sh /usr/local/bin/mac_ip_alloc.sh && chmod +x /usr/local/bin/mac_ip_alloc.sh"
+    gateway.vm.provision :shell, inline: "echo dhcp-range=#{VM_LAN_IP_PREFIX}1.1,#{VM_LAN_IP_PREFIX}255.254,#{VM_LAN_MASK},infinite > /etc/dnsmasq.d/vm-enable-dhcp.conf"
+  end
+end

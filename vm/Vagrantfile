@@ -1,0 +1,86 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+CLUSTER_NAME = File.basename(File.expand_path(File.dirname(__FILE__)))
+NUM_VMS = 2
+NUM_CPU_CORES = 2
+CAP_MEMORY = 4096
+BASE_BOX = "ubuntu/bionic64"
+
+# DO NOT modify unless being necessary
+VM_LAN = "vboxnet0"
+VM_LAN_IP_PREFIX = "10.38."
+# Currently only a 16bit mask is supported.
+VM_LAN_MASK = "255.255.0.0"
+VM_LAN_IP = "#{VM_LAN_IP_PREFIX}0.1"
+VM_LAN_GATEWAY_IP = "#{VM_LAN_IP_PREFIX}0.2"
+GATEWAY_MACHINE = "#{VM_LAN}-gateway"
+ROOT_RSA = "~/.ssh/id_rsa"
+
+Vagrant.configure("2") do |config|
+  config.trigger.before :up do |t|
+    t.info = "Preparing network"
+    t.ruby do |env, m|
+      puts "fetching the LAN gateway machine #{GATEWAY_MACHINE}"
+      vmstat = `VBoxManage showvminfo #{GATEWAY_MACHINE} --machinereadable | grep VMState=`
+      raise "Please install the lan gateway" if !$?.success?
+      if vmstat != "running" and vmstat != "starting"
+        puts "starting gateway"
+        `VBoxManage startvm #{GATEWAY_MACHINE} --type headless`
+      end
+
+      r = Vagrant::Util::Subprocess.execute(
+        'ssh', "-i", ROOT_RSA,
+        "vagrant@#{VM_LAN_GATEWAY_IP}",
+        "sudo /usr/local/bin/mac_ip_alloc.sh #{m.config.vm.hostname} #{VM_LAN_IP_PREFIX}",
+        :notify => [:stdout, :stderr],)
+
+      raise r.stderr if r.exit_code != 0
+      addr = r.stdout.split(/\s+/)
+      raise addr if addr.length != 2
+      mac = addr[0]
+      ip = addr[1]
+
+      puts "got ip #{ip}, mac #{mac}"
+
+      m.config.vm.network :private_network, :name => VM_LAN, :adapter => 1, :ip => ip, :netmask => VM_LAN_MASK, :mac => mac, auto_config: false
+      m.config.ssh.host = ip
+    end
+  end
+
+  config.trigger.after :halt do |t|
+    t.info = "Stopping gateway"
+    t.ruby do |env, m|
+      runningVM = `vagrant global-status | grep running | awk '{ print $2 }'`
+      if runningVM == "" || runningVM == GATEWAY_MACHINE
+        `VBoxManage controlvm #{GATEWAY_MACHINE} acpipowerbutton`
+      end
+    end
+  end
+
+  VMGROUP = "/" + CLUSTER_NAME
+  DOMAIN_SUFFIX = "." + CLUSTER_NAME + ".env.lab.io"
+
+  (1..NUM_VMS).each do |i|
+    config.vm.define CLUSTER_NAME+"-m#{i}" do |master|
+      master.vm.provider :virtualbox do |vbox|
+        vbox.name = CLUSTER_NAME+"-m#{i}"
+        vbox.memory = CAP_MEMORY
+        vbox.cpus = NUM_CPU_CORES
+        vbox.customize ["modifyvm", :id, "--groups", VMGROUP]
+      end
+
+      master.vm.hostname = "m#{i}" + DOMAIN_SUFFIX
+      master.vm.box = BASE_BOX
+      master.vm.network :forwarded_port, guest: 22, host: 2222, id: "ssh", disabled: true
+      master.ssh.port = 22
+
+      master.vm.provision :shell, inline: "hostnamectl set-hostname " + master.vm.hostname
+      master.vm.provision :shell, inline: "touch /etc/cloud/cloud-init.disabled"
+      master.vm.provision :shell, inline: "systemctl disable systemd-resolved.service apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service"
+      master.vm.provision :shell, inline: "systemctl stop systemd-resolved.service apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service"
+      master.vm.provision :shell, inline: "rm -f /etc/resolv.conf"
+      master.vm.provision :shell, inline: "echo 'nameserver #{VM_LAN_GATEWAY_IP}' > /etc/resolv.conf"
+    end
+  end
+end
