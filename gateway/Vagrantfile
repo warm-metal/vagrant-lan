@@ -7,6 +7,7 @@ VM_LAN_IP = "#{VM_LAN_IP_PREFIX}0.1"
 VM_LAN_GATEWAY_IP = "#{VM_LAN_IP_PREFIX}0.2"
 GATEWAY_MACHINE = "#{VM_LAN}-gateway"
 ROOT_RSA = "~/.ssh/id_rsa"
+LAN_DOMAIN_SUFFIX = "env.lab.local"
 
 Vagrant.configure("2") do |config|
   config.trigger.before :up do |t|
@@ -27,13 +28,20 @@ Vagrant.configure("2") do |config|
     end
   end
 
-  config.trigger.before :destroy do |t|
+  config.trigger.after :destroy do |t|
     t.info = "Removing group"
     t.ruby do |env, m|
-      `VBoxManage modifyvm #{m.id} --groups ""`
+      machineRoot = `VBoxManage list systemproperties | grep 'Default machine folder:' | awk -F: '{ print $2 }'`
+      machineRoot.strip!
+      raise "not machine root found" if machineRoot.empty?
+      group = File.join(machineRoot, GATEWAY_MACHINE)
+      if File.directory?(group)
+        FileUtils.rm_r(group)
+        puts "#{group} deleted"
+      end
     end
   end
-  
+
   config.trigger.after :destroy do |t|
     t.info = "removing network #{VM_LAN}"
     t.ruby do |env, m|
@@ -56,9 +64,10 @@ Vagrant.configure("2") do |config|
     gateway.vm.provision :shell, inline: "rc-update add dnsmasq && rc-update add iptables && /etc/init.d/iptables save"
     gateway.vm.provision :file, source: ROOT_RSA+".pub", destination: "/tmp/authorized_keys"
     gateway.vm.provision :shell, inline: "cat /tmp/authorized_keys >> /home/vagrant/.ssh/authorized_keys"
-    `curl -kL https://raw.githubusercontent.com/warm-metal/vagrant-lan/master/mac_ip_alloc.sh -o /tmp/mac_ip_alloc.sh`
+    `curl -skL https://raw.githubusercontent.com/warm-metal/vagrant-lan/master/mac_ip_alloc.sh -o /tmp/mac_ip_alloc.sh`
     gateway.vm.provision :file, source: "/tmp/mac_ip_alloc.sh", destination: "/tmp/mac_ip_alloc.sh"
     gateway.vm.provision :shell, inline: "mv /tmp/mac_ip_alloc.sh /usr/local/bin/mac_ip_alloc.sh && chmod +x /usr/local/bin/mac_ip_alloc.sh"
     gateway.vm.provision :shell, inline: "echo dhcp-range=#{VM_LAN_IP_PREFIX}1.1,#{VM_LAN_IP_PREFIX}255.254,#{VM_LAN_MASK},infinite > /etc/dnsmasq.d/vm-enable-dhcp.conf"
+    gateway.vm.provision :shell, inline: "echo local=/#{LAN_DOMAIN_SUFFIX}/ > /etc/dnsmasq.d/vm-localdns.conf"
   end
 end

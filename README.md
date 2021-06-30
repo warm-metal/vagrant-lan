@@ -12,8 +12,10 @@ First of all, you need **VirtualBox** and  **vagrant**.
 Then, download or clone this repo to your mac or pc.
 
 Run `vagrant up` in the `gateway` directory to initialize the LAN gateway.
+The gateway will be stopped automatically after halting the last machine in the LAN, and also started before the first machine getting up.
+
 You can modify the network configuration in the Vagrantfile.
-The configuration variables are shown in the table below.
+Variables shown in the table below can be modified to change the network configuration.
 Once any variables in the table are changed, make sure they are identical in Vagrantfiles of both gateway and vms.
 
 | Variable | Description |
@@ -25,7 +27,6 @@ Once any variables in the table are changed, make sure they are identical in Vag
 | VM_LAN_GATEWAY_IP | The IP address of the only gateway machine in the LAN. |
 | GATEWAY_MACHINE | The name of the gateway machine. |
 | ROOT_RSA | The path to a SSH id that is used to execute IP address allocating approches before machine provisioning. |
-
 
 Finally, use the Vagrantfile in the `vm` folder to start your machines. Users can modify variables below to change the vm spec.
 | Variable | Description |

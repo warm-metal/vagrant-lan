@@ -1,5 +1,6 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
+require 'resolv'
 
 CLUSTER_NAME = File.basename(File.expand_path(File.dirname(__FILE__)))
 NUM_VMS = 2
@@ -16,16 +17,24 @@ VM_LAN_IP = "#{VM_LAN_IP_PREFIX}0.1"
 VM_LAN_GATEWAY_IP = "#{VM_LAN_IP_PREFIX}0.2"
 GATEWAY_MACHINE = "#{VM_LAN}-gateway"
 ROOT_RSA = "~/.ssh/id_rsa"
+LAN_DOMAIN_SUFFIX = "env.lab.local"
+
+VMGROUP = "/" + CLUSTER_NAME
+DOMAIN_SUFFIX = "." + CLUSTER_NAME + "." + LAN_DOMAIN_SUFFIX
+
+def is_gateway_running?
+  vmstat = `VBoxManage showvminfo #{GATEWAY_MACHINE} --machinereadable | grep VMState=`
+  raise "Please install the lan gateway" if !$?.success?
+  vmstat.strip!
+  return vmstat == 'VMState="running"' || vmstat == 'VMState="starting"'
+end
 
 Vagrant.configure("2") do |config|
-  config.trigger.before :up do |t|
+    config.trigger.before :up do |t|
     t.info = "Preparing network"
     t.ruby do |env, m|
       puts "fetching the LAN gateway machine #{GATEWAY_MACHINE}"
-      vmstat = `VBoxManage showvminfo #{GATEWAY_MACHINE} --machinereadable | grep VMState=`
-      raise "Please install the lan gateway" if !$?.success?
-      vmstat.strip!
-      if vmstat != 'VMState="running"' and vmstat != 'VMState="starting"'
+      if !is_gateway_running?
         puts "starting gateway #{vmstat}"
         `VBoxManage startvm #{GATEWAY_MACHINE} --type headless`
       end
@@ -54,21 +63,26 @@ Vagrant.configure("2") do |config|
     t.info = "Stopping gateway"
     t.ruby do |env, m|
       runningVM = `vagrant global-status | grep running | awk '{ print $2 }'`
+      runningVM.strip!
       if runningVM == "" || runningVM == GATEWAY_MACHINE
         `VBoxManage controlvm #{GATEWAY_MACHINE} acpipowerbutton`
       end
     end
   end
 
-  config.trigger.before :destroy do |t|
+  config.trigger.after :destroy do |t|
     t.info = "Removing group"
     t.ruby do |env, m|
-      `VBoxManage modifyvm #{m.id} --groups ""`
+      machineRoot = `VBoxManage list systemproperties | grep 'Default machine folder:' | awk -F: '{ print $2 }'`
+      machineRoot.strip!
+      raise "not machine root found" if machineRoot.empty?
+      group = File.join(machineRoot, CLUSTER_NAME, CLUSTER_NAME+'-'+m.config.vm.hostname.delete_suffix(DOMAIN_SUFFIX))
+      if File.directory?(group)
+        FileUtils.rm_r(group)
+        puts "#{group} deleted"
+      end
     end
   end
-
-  VMGROUP = "/" + CLUSTER_NAME
-  DOMAIN_SUFFIX = "." + CLUSTER_NAME + ".env.lab.io"
 
   (1..NUM_VMS).each do |i|
     config.vm.define CLUSTER_NAME+"-m#{i}" do |master|
@@ -83,6 +97,15 @@ Vagrant.configure("2") do |config|
       master.vm.box = BASE_BOX
       master.vm.network :forwarded_port, guest: 22, host: 2222, id: "ssh", disabled: true
       master.ssh.port = 22
+      if is_gateway_running?
+        begin
+          r = Resolv::DNS.new(:nameserver => VM_LAN_GATEWAY_IP)
+          r.timeouts = 2
+          master.ssh.host = r.getaddress(master.vm.hostname).to_s
+        rescue
+          puts "address of the machine #{master.vm.hostname} is not ready yet."
+        end
+      end
 
       master.vm.provision :shell, inline: "hostnamectl set-hostname " + master.vm.hostname
       master.vm.provision :shell, inline: "touch /etc/cloud/cloud-init.disabled"
