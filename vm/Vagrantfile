@@ -59,7 +59,7 @@ Vagrant.configure("2") do |config|
     end
   end
 
-  config.trigger.after :halt do |t|
+  config.trigger.after :halt, :destroy do |t|
     t.info = "Stopping gateway"
     t.ruby do |env, m|
       runningVM = `vagrant global-status | grep running | awk '{ print $2 }'`
