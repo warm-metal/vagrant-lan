@@ -35,7 +35,7 @@ Vagrant.configure("2") do |config|
     t.ruby do |env, m|
       puts "fetching the LAN gateway machine #{GATEWAY_MACHINE}"
       if !is_gateway_running?
-        puts "starting gateway #{vmstat}"
+        puts "starting gateway #{GATEWAY_MACHINE}"
         `VBoxManage startvm #{GATEWAY_MACHINE} --type headless`
       end
 
