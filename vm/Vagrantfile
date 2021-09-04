@@ -1,8 +1,6 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
-require 'resolv'
-
-CLUSTER_NAME = File.basename(File.expand_path(File.dirname(__FILE__)))
+CLUSTER_NAME = "vm2"
 NUM_VMS = 2
 NUM_CPU_CORES = 2
 CAP_MEMORY = 4096
@@ -30,42 +28,16 @@ def is_gateway_running?
 end
 
 Vagrant.configure("2") do |config|
-    config.trigger.before :up do |t|
-    t.info = "Preparing network"
-    t.ruby do |env, m|
-      puts "fetching the LAN gateway machine #{GATEWAY_MACHINE}"
-      if !is_gateway_running?
-        puts "starting gateway #{GATEWAY_MACHINE}"
-        `VBoxManage startvm #{GATEWAY_MACHINE} --type headless`
-      end
-
-      puts "fetching address of #{m.config.vm.hostname}"
-      r = Vagrant::Util::Subprocess.execute(
-        'ssh', "-i", ROOT_RSA,
-        '-o', 'StrictHostKeyChecking=no',
-        "vagrant@#{VM_LAN_GATEWAY_IP}",
-        "sudo /usr/local/bin/mac_ip_alloc.sh #{m.config.vm.hostname} #{VM_LAN_IP_PREFIX}",
-        :notify => [:stdout, :stderr],)
-
-      addr = r.stdout.split(/\s+/)
-      raise r.stdout if addr.length != 2
-      mac = addr[0]
-      ip = addr[1]
-
-      puts "got ip #{ip}, mac #{mac}"
-
-      m.config.vm.network :private_network, :name => VM_LAN, :adapter => 1, :ip => ip, :netmask => VM_LAN_MASK, :mac => mac, auto_config: false
-      m.config.ssh.host = ip
-    end
-  end
-
   config.trigger.after :halt, :destroy do |t|
     t.info = "Stopping gateway"
     t.ruby do |env, m|
-      runningVM = `vagrant global-status | grep running | awk '{ print $2 }'`
+      `vagrant global-status --prune`
+      runningVM = `vagrant global-status | grep virtualbox | grep running | awk '{ print $2 }'`
       runningVM.strip!
       if runningVM == "" || runningVM == GATEWAY_MACHINE
         `VBoxManage controlvm #{GATEWAY_MACHINE} acpipowerbutton`
+      else
+        puts "VM ${runningVM} are still running."
       end
     end
   end
@@ -95,16 +67,33 @@ Vagrant.configure("2") do |config|
 
       master.vm.hostname = "m#{i}" + DOMAIN_SUFFIX
       master.vm.box = BASE_BOX
-      master.vm.network :forwarded_port, guest: 22, host: 2222, id: "ssh", disabled: true
-      master.ssh.port = 22
-      if is_gateway_running?
-        begin
-          r = Resolv::DNS.new(:nameserver => VM_LAN_GATEWAY_IP)
-          r.timeouts = 2
-          master.ssh.host = r.getaddress(master.vm.hostname).to_s
-        rescue
-          puts "address of the machine #{master.vm.hostname} is not ready yet."
+
+      if ARGV[0] == "up"
+        puts "fetching the LAN gateway machine #{GATEWAY_MACHINE}"
+        if !is_gateway_running?
+          puts "starting gateway #{GATEWAY_MACHINE}"
+          `VBoxManage startvm #{GATEWAY_MACHINE} --type headless`
         end
+
+        puts "fetching address of #{master.vm.hostname}"
+        r = Vagrant::Util::Subprocess.execute(
+          'ssh', "-i", ROOT_RSA,
+          '-o', 'StrictHostKeyChecking=no',
+          "vagrant@#{VM_LAN_GATEWAY_IP}",
+          "sudo /usr/local/bin/mac_ip_alloc.sh #{master.vm.hostname} #{VM_LAN_IP_PREFIX}",
+          :notify => [:stdout, :stderr],)
+
+        addr = r.stdout.split(/\s+/)
+        raise r.stdout if addr.length != 2
+        mac = addr[0]
+        ip = addr[1]
+
+        puts "got ip #{ip}, mac #{mac}"
+
+        master.vm.network :private_network, :name => VM_LAN, :adapter => 1, :ip => ip, :netmask => VM_LAN_MASK, :mac => mac, auto_config: false
+        master.vm.network :forwarded_port, guest: 22, host: 2222, id: "ssh", disabled: true
+        master.ssh.port = 22
+        master.ssh.host = ip
       end
 
       master.vm.provision :shell, inline: "hostnamectl set-hostname " + master.vm.hostname
