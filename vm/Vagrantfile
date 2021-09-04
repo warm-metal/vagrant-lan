@@ -31,13 +31,26 @@ Vagrant.configure("2") do |config|
   config.trigger.after :halt, :destroy do |t|
     t.info = "Stopping gateway"
     t.ruby do |env, m|
+      runningVM = `vagrant global-status | grep virtualbox | grep running | awk '{ print $2 }'`
+      runningVM.strip!
+      if runningVM == "" || runningVM == GATEWAY_MACHINE
+        `VBoxManage controlvm #{GATEWAY_MACHINE} acpipowerbutton`
+        next
+      end
+
+      if runningVM.match(/#{CLUSTER_NAME}-m\d+/)
+        puts "There are our guests still running"
+        next
+      end
+      
+      puts "Try to prune the vagrant status."
       `vagrant global-status --prune`
       runningVM = `vagrant global-status | grep virtualbox | grep running | awk '{ print $2 }'`
       runningVM.strip!
       if runningVM == "" || runningVM == GATEWAY_MACHINE
         `VBoxManage controlvm #{GATEWAY_MACHINE} acpipowerbutton`
       else
-        puts "VM ${runningVM} are still running."
+        puts "VM #{runningVM} are still running."
       end
     end
   end
