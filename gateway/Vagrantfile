@@ -10,6 +10,7 @@ ROOT_RSA = "~/.ssh/id_rsa"
 LAN_DOMAIN_SUFFIX = "env.lab.local"
 
 Vagrant.configure("2") do |config|
+  config.vbguest.auto_update = false if Vagrant.has_plugin?('vagrant-vbguest')
   config.trigger.before :up do |t|
     t.info = "Validating network and the gateway machine"
     t.ruby do |env, m|
